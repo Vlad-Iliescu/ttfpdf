@@ -22,6 +22,7 @@ __author__ = 'Vlad'
 #// 0x00010000 for Windows
 #// Either seems to work for a font embedded in a PDF file
 #// when read by Adobe Reader on a Windows PC(!)
+
 _TTF_MAC_HEADER = False
 #TrueType Font Glyph operators
 GF_WORDS = (1 << 0)
@@ -51,7 +52,7 @@ class TTFontFile:
         self.descent = 0
         self.TTC_fonts = {}
         self.version = version = self.read_ulong()
-        if (version == 0x4F54544F):
+        if version == 0x4F54544F:
             raise RuntimeError('Postscript outlines are not supported')
         if version == 0x74746366:
             raise RuntimeError('TrueType Fonts Collections not supported')
@@ -80,33 +81,33 @@ class TTFontFile:
         xhi = x[0]
         ylo = y[1]
         yhi = y[0]
-        if (ylo > xlo):
+        if ylo > xlo:
             xlo += 1 << 16
             yhi += 1
         reslo = xlo - ylo
         if yhi > xhi:
             xhi += 1 << 16
         reshi = xhi - yhi
-        reshi = reshi & 0xFFFF
-        return (reshi, reslo)
+        reshi &= 0xFFFF
+        return reshi, reslo
 
     def calcChecksum(self, data):
         if len(data) % 4:
             data += "\0"*(4-(len(data) % 4))
-        hi=0x0000
-        lo=0x0000
+        hi = 0x0000
+        lo = 0x0000
         for i in xrange(0,len(data),4):
             hi = (ord(data[i])<<8) + ord(data[i+1])
             lo = (ord(data[i+2])<<8) + ord(data[i+3])
             hi += lo >> 16
             lo &= 0xFFFF
             hi &= 0xFFFF
-        return hi,lo
+        return hi, lo
 
     def get_table_pos(self, tag):
         offset = self.tables[tag]['offset']
         length = self.tables[tag]['length']
-        return (offset, length)
+        return offset, length
 
     def seek(self, pos):
         self._pos = pos
@@ -143,36 +144,35 @@ class TTFontFile:
     def read_ushort(self):
         self._pos += 2
         s = self.fh.read(2)
-        return (ord(s[0])<<8) + ord(s[1])
+        return (ord(s[0]) << 8) + ord(s[1])
 
     def read_ulong(self):
         self._pos += 4
         s = self.fh.read(4)
-        return (ord(s[0])*16777216) + (ord(s[1])<<16) + (ord(s[2])<<8) + ord(s[3]) #16777216  = 1<<24
+        return (ord(s[0]) * 16777216) + (ord(s[1]) << 16) + (ord(s[2]) << 8) + ord(s[3]) #16777216  = 1<<24
 
     def get_ushort(self, pos):
         self.fh.seek(pos)
         s = self.fh.read(2)
-        return (ord(s[0])<<8) + ord(s[1])
+        return (ord(s[0]) << 8) + ord(s[1])
 
     def get_ulong(self, pos):
         self.fh.seek(pos)
         s = self.fh.read(4)
-        return (ord(s[0])*16777216) + (ord(s[1])<<16) + (ord(s[2])<<8) + ord(s[3]) #16777216  = 1<<24
+        return (ord(s[0]) * 16777216) + (ord(s[1]) << 16) + (ord(s[2]) << 8) + ord(s[3]) #16777216  = 1<<24
 
     def pack_short(self, val):
-        if val <0:
+        if val < 0:
             val = abs(val)
             val = ~val
             val += 1
-        return pack(">H",val)
+        return pack(">H", val)
 
     def splice(self, stream, offset, value):
         return stream[:offset] + value + stream[offset+len(value):]
 
-
     def _set_ushort(self, stream, offset, value):
-        up = pack(">H",value)
+        up = pack(">H", value)
         return self.splice(stream, offset, up)
 
     def _set_short(self, stream, offset, val):
@@ -180,7 +180,7 @@ class TTFontFile:
             val = abs(val)
             val = ~val
             val += 1
-        up = pack(">H",val)
+        up = pack(">H", val)
         return self.splice(stream, offset, up)
 
     def get_chunk(self, pos, length):
@@ -237,7 +237,7 @@ class TTFontFile:
                 self.seek(string_data_offset + offset)
                 if length % 2:
                     raise RuntimeError("PostScript name is UTF-16BE string of odd length")
-                length = length/2
+                length /= 2
                 n_l = []
                 n_a = n_l.append
                 while length > 0:
@@ -263,9 +263,9 @@ class TTFontFile:
         if names[6]:
             ps_name = names[6]
         elif names[4]:
-            ps_name = re.sub(' ','-',names[4])
+            ps_name = re.sub(' ', '-', names[4])
         elif names[1]:
-            ps_name = re.sub(' ','-',names[1])
+            ps_name = re.sub(' ' ,'-', names[1])
         else:
             ps_name = ''
 
@@ -286,7 +286,7 @@ class TTFontFile:
         self.seek_table("head")
         self.skip(18)
         self.units_per_em = units_per_em = self.read_ushort()
-        scale = 1000.0 / units_per_em #TODO chech id int or float
+        scale = 1000.0 / units_per_em
         self.skip(16)
         x_min = self.read_ushort()
         y_min = self.read_ushort()
@@ -309,8 +309,8 @@ class TTFontFile:
             self.skip(4)
             hhea_ascender = self.read_ushort()
             hhea_descender = self.read_ushort()
-            self.ascent = hhea_ascender*scale
-            self.descent  =hhea_descender*scale
+            self.ascent = hhea_ascender * scale
+            self.descent = hhea_descender * scale
 
 #        ///////////////////////////////////
 #        // OS/2 - OS/2 and Windows metrics table
@@ -337,23 +337,23 @@ class TTFontFile:
             s_typo_ascender = self.read_ushort()
             s_typo_descender = self.read_ushort()
             if not(hasattr(self,'ascent') and self.ascent):
-                self.ascent = s_typo_ascender*scale
+                self.ascent = s_typo_ascender * scale
             if not(hasattr(self,'descent') and self.descent):
-                self.descent = s_typo_descender*scale
+                self.descent = s_typo_descender * scale
             if version > 1:
                 self.skip(16)
                 s_cap_height = self.read_ushort()
-                self.cap_height = s_cap_height*scale
+                self.cap_height = s_cap_height * scale
             else:
                 self.cap_height = self.ascent
         else:
             us_weight_class = 500
             if not(hasattr(self,'ascent') and self.ascent):
-                self.ascent = y_max*scale
+                self.ascent = y_max * scale
             if not(hasattr(self,'descent') and self.descent):
-                self.descent = y_min*scale
+                self.descent = y_min * scale
             self.cap_height = self.ascent
-        self.stem_v = 50 + int((us_weight_class/65.0)**2)
+        self.stem_v = 50 + int((us_weight_class / 65.0)**2)
 
 #        ///////////////////////////////////
 #        // post - PostScript table
@@ -714,7 +714,7 @@ class TTFontFile:
                     if original_glyph_idx not in self.glyph_data:
                         self.glyph_data[original_glyph_idx] = {'compGlyphs': []}
                     self.glyph_data[original_glyph_idx]['compGlyphs'].append(glyph_idx)
-                    data = self._set_ushort(data, pos_in_glyph + 2, glyph_set.get(glyph_idx,0)) #todo get in loc de  []
+                    data = self._set_ushort(data, pos_in_glyph + 2, glyph_set.get(glyph_idx,0)) #changed to get()
                     pos_in_glyph += 4
                     if flags & GF_WORDS:
                         pos_in_glyph += 4
@@ -732,7 +732,7 @@ class TTFontFile:
             pos += glyph_len
             if pos % 4:
                 padding = 4 - (pos % 4)
-                glyf_add("\0"*padding)
+                glyf_add("\0" * padding)
                 pos += padding
 
         hmtx_str = ''.join(hmtx_list)
@@ -751,7 +751,7 @@ class TTFontFile:
         if ((pos + 1) >> 1) > 0xFFFF:
             index_to_loc_format = 1     #long format
             for offset in offsets:
-                loca_add(pack(">L",offset))
+                loca_add(pack(">L", offset))
         else:
             index_to_loc_format = 0     #short format
             for offset in offsets:
@@ -792,7 +792,7 @@ class TTFontFile:
         max_depth = max(max_depth, depth)
         if len(self.glyph_data[original_glyph_idx]['compGlyphs']):
             for glyph_idx in self.glyph_data[original_glyph_idx]['compGlyphs']:
-                max_depth, depth, points, contours = self.get_glyph_data(glyph_idx,max_depth, depth, points,contours)
+                max_depth, depth, points, contours = self.get_glyph_data(glyph_idx, max_depth, depth, points, contours)
         elif (self.glyph_data[original_glyph_idx]['nContours'] > 0) and depth > 0:
             #simple
             contours += self.glyph_data[original_glyph_idx]['nContours']
@@ -838,10 +838,8 @@ class TTFontFile:
                 elif flags & GF_TWOBYTWO:
                     self.skip(8)
 
-
 ########################################################################################################################
 ########################################################################################################################
-
     def get_HMTX(self, number_of_h_metrics, num_glyphs, glyph_to_char, scale):
         start = self.seek_table('hmtx')
         aw = 0
@@ -855,7 +853,7 @@ class TTFontFile:
             self.seek(start)
         for glyph in xrange(number_of_h_metrics):
             if number_of_h_metrics * 4 < self.max_str_len_read:
-                aw = arr[glyph * 2] #todo changed from arr[glyph * 2 + 1]
+                aw = arr[glyph * 2]
             else:
                 aw = self.read_ushort()
                 lsb = self.read_ushort()
@@ -919,12 +917,12 @@ class TTFontFile:
             data = self.get_chunk(start, num_glyphs * 2 + 2)
             arr = unpack(">{0}H".format(len(data)/2), data)
             for n in xrange(num_glyphs+1):
-                glyph_pos_add(arr[n] * 2) #todo changed from arr[n+1]
+                glyph_pos_add(arr[n] * 2)
         elif index_to_loc_format == 1:
             data = self.get_chunk(start, num_glyphs * 4 + 4)
             arr = unpack(">{0}L".format(len(data)/4), data)
             for n in xrange(num_glyphs+1):
-                glyph_pos_add(arr[n])   #todo changed from arr[n+1]
+                glyph_pos_add(arr[n])
         else:
             raise RuntimeError('Unknown location table format {0}'.format(index_to_loc_format))
 
@@ -964,7 +962,7 @@ class TTFontFile:
                     glyph = (unichar + id_delta[n]) & 0xFFFF
                 else:
                     offset = (unichar - start_count[n]) * 2 + id_range_offset[n]
-                    offset = id_range_offset_add + 2 * n + offset
+                    offset += id_range_offset_add + 2 * n
                     if offset >= limit:
                         glyph = 0
                     else:
@@ -1024,63 +1022,3 @@ class TTFontFile:
 
         stm = self.splice(stm, head_start + 8, chk)
         return  stm
-
-if __name__ == '__main__':
-    import os
-    family='DejaVuSerif'.lower()
-    style =''
-    fontkey=family+style
-    file = family.replace(' ','')+style.lower()+'.ttf'
-    ttf_filename = file
-    unifilename = os.path.join(file.split('.')[0].lower())
-#
-#    ttf_stat = os.stat(ttf_filename)
-#
-#    if os.path.exists(unifilename+'.mtx.py'):
-#        execfile(unifilename+'.mtx.py',globals(),globals())
-#
-#    ttffile = ttf_filename
-#    ttf = TTFontFile()
-#    ttf.get_metrics(ttffile)
-#    cw = ttf.char_widths
-#    name = re.sub('[ ()]','',ttf.full_name)
-#
-#    desc = {
-#        'Ascent': round(ttf.ascent),
-#        'Descent': round(ttf.descent),
-#        'CapHeight': round(ttf.cap_height),
-#        'Flags': round(ttf.flags),
-#        'FontBBox': '[{0} {1} {2}, {3}]'.format(*[str(round(b)) for b in ttf.bbox]),
-#        'ItalicAngle': round(ttf.italic_angle),
-#        'StemV' : round(ttf.stem_v),
-#        'MissingWidth': round(ttf.default_width)
-#    }
-#    up = round(ttf.underline_position)
-#    ut = round(ttf.underline_thickness)
-#    originalsize = ttf_stat.st_size
-#    type = 'TTF'
-#    s = "\n".join([
-#        'name = "{0}"'.format(name),
-#        'type = "{0}"'.format(type),
-#        'desc = {0}'.format(desc),
-#        'up = {0}'.format(up),
-#        'ut = {0}'.format(ut),
-#        'ttffile = "{0}"'.format(ttffile),
-#        'originalsize = {0}'.format(originalsize),
-#        'fontkey = "{0}"'.format(fontkey)
-#    ])
-#    if os.access('x',os.W_OK):
-#        fh = open(unifilename + '.mtx.py','w')
-#        fh.write(s)
-#        fh.close()
-#        fh = open(unifilename + '.cw.dat', 'wb')
-#        fh.write(cw)
-#        fh.close()
-#        #os.unlink(unifilename + '.cw127.py')
-#    del ttf
-    a = {}
-    if os.path.exists(unifilename+'.mtx.py'):
-        execfile(unifilename+'.mtx.py',globals(),a)
-    cw = open(unifilename+'.cw.dat', 'r').read()
-    print cw
-#    print os.access('/',os.W_OK)
