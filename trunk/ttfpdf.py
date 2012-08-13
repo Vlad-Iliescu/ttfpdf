@@ -12,7 +12,10 @@
 # *****************************************************************************/
 
 from datetime import datetime
-import os, zlib, struct, re
+import os
+import zlib
+import struct
+import re
 
 try:
     # Check if PIL is available, necessary for JPEG support.
@@ -41,7 +44,7 @@ def mb_strlen(string, encoding='UTF-8'):
 FPDF_VERSION = '0.9'
 FPDF_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),'font')
 
-class FPDF:
+class TTFPDF:
 #Private properties
 #~
 #~ page;               #current page number
@@ -540,7 +543,7 @@ class FPDF:
                 if not n:
                     n = len(self.diffs) + 1
                     self.diffs[n] = info['diff']
-                info['diff'] = n
+                info['diffn'] = n
             if info.get('file'):
                 #Embedded font
                 if info['type'] == 'TrueType':
@@ -1526,8 +1529,8 @@ class FPDF:
                 self._out('/Widths ' + str(self.n+1) + ' 0 R')
                 self._out('/FontDescriptor ' + str(self.n + 2) + ' 0 R')
                 if font['enc']:
-                    if 'diff' in font:
-                        self._out('/Encoding ' + str(nf + font['diff']) + ' 0 R')
+                    if 'diff' in font and font['diff']:
+                        self._out('/Encoding ' + str(nf) + font['diff'] + ' 0 R')
                     else:
                         self._out('/Encoding /WinAnsiEncoding')
                 self._out('>>')
@@ -2072,10 +2075,10 @@ class FPDF:
 
 
 if __name__ == "__main__":
-    pdf = FPDF()
+    pdf = TTFPDF()
     pdf.add_page()
 
-    pdf.add_font('DejaVu','','DejaVuSans.ttf', True)
+    pdf.add_font('DejaVu','', 'DejaVuSans.ttf', True)
     pdf.set_font('DejaVu','',14)
 
     txt = open('HelloWorld.txt', 'r')

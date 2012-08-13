@@ -962,7 +962,7 @@ class TTFontFile:
                     glyph = (unichar + id_delta[n]) & 0xFFFF
                 else:
                     offset = (unichar - start_count[n]) * 2 + id_range_offset[n]
-                    offset += id_range_offset_add + 2 * n
+                    offset += id_range_offset_start + 2 * n
                     if offset >= limit:
                         glyph = 0
                     else:
