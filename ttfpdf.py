@@ -204,6 +204,9 @@ class TTFPDF:
         self.padding = "\x28\xBF\x4E\x5E\x4E\x75\x8A\x41\x64\x00\x4E\x56\xFF\xFA\x01\x08"\
             "\x2E\x2E\x00\xB6\xD0\x68\x3E\x80\x2F\x0C\xA9\xFE\x64\x53\x69\x7A"
 
+        self.files = []
+        self.n_files = 0
+
     def set_margins(self, left, top, right=None):
         """Set left, top and right margins"""
         self.l_margin = left
@@ -1163,7 +1166,83 @@ class TTFPDF:
         self.encrypted = True
         self._generateencryptionkey(user_pass, owner_pass, protection)
 
+    def rounded_rectangle(self, x, y, w, h, radius, style='', corners='1234'):
+        k = self.k
+        hp = self.h
+        if style == 'F':
+            op = 'f'
+        elif style == 'FD' or style == 'DF':
+            op = 'B'
+        else:
+            op = 'S'
 
+        arc = 4.0 / 3.0 * (2.0**0.5 - 1)
+        self._out(sprintf('%.2f %.2f m', (x+radius)*k, (hp-y)*k))
+
+        # ARC 2
+        xc = x + w - radius
+        yc = y + radius
+        self._out(sprintf('%.2f %.2f l', xc*k, (hp-y)*k))
+        if '2' in corners:
+            self._arc(xc+radius*arc, yc-radius, xc+radius, yc-radius*arc, xc+radius, yc)
+        else:
+            self._out(sprintf('%.2f %.2f l', (x+w)*k, (hp-y)*k))
+
+        #ARC 3
+        xc = x + w - radius
+        yc = y + h - radius
+        self._out(sprintf('%.2f %.2f l', (x+w)*k, (hp-yc)*k))
+        if '3' in corners:
+            self._arc(xc+radius, yc+radius*arc, xc+radius*arc, yc+radius,  xc, yc+radius)
+        else:
+            self._out(sprintf('%.2f %.2f l', (x+w)*k, (hp-(y+h))*k))
+
+        #ARC 4
+        xc = x + radius
+        yc= y + h - radius
+        self._out(sprintf('%.2f %.2f l', xc*k, (hp-(y+h))*k))
+        if '4' in corners:
+            self._arc(xc-radius*arc, yc+radius, xc-radius, yc+radius*arc, xc-radius, yc)
+        else:
+            self._out(sprintf('%.2f %.2f l', x*k, (hp-(y+h))*k))
+
+        #ARC 1
+        xc = x + radius
+        yc = y + radius
+        self._out(sprintf('%.2f %.2f l', x*k, (hp-yc)*k ))
+        if '1' in corners:
+            self._arc(xc-radius, yc-radius*arc, xc-radius*arc, yc-radius, xc, yc-radius)
+        else:
+            self._out(sprintf('%.2f %.2f l', x*k, (hp-y)*k))
+            self._out(sprintf('%.2f %.2f l', (x+radius)*k, (hp-y)*k))
+        self._out(op)
+
+    def shadow_cell(self, w, h=0, txt='', border=0, ln=0, align='', fill=False, link=0, color='G', distance=0.5):
+        if color == 'G':
+            shadow_color = 100
+        elif color == 'B':
+            shadow_color = 0
+        else:
+            shadow_color = color
+        text_color = self.text_color
+        x = self.x
+        self.set_text_color(shadow_color)
+        self.cell(w, h, txt, border, 0, align, fill, link)
+        self.text_color = text_color
+        self.x = x
+        self.y += distance
+        self.cell(w, h, txt, 0, ln, align)
+
+    def attach(self, file, name='', desc=''):
+        #also supports StringIO or any object with a .read() method
+        # name is mandatory for those files
+        if name == '':
+            name = os.path.basename(file)
+        if isinstance(file, basestring):
+            file = open(file, 'rb')
+        if not file:
+            self.error('Cannot open file: '+name)
+        self.files.append({'file': file, 'name': name, 'desc': desc})
 
 # ******************************************************************************
 # *                                                                              *
@@ -1596,7 +1675,7 @@ class TTFPDF:
                 ttf = TTFontFile()
                 font_name = 'MPDFAA' + '+' + font['name']
                 subset = font['subset']
-                if len(subset):
+                if 0 in subset:
                     del subset[0]
                 ttf_font_stream = ttf.make_subset(font['ttffile'], subset)
                 ttf_font_size = len(ttf_font_stream)
@@ -1895,6 +1974,8 @@ class TTFPDF:
         self._putresourcedict()
         self._out('>>')
         self._out('endobj')
+        if self.files:
+            self._putfiles()
 
         if self.encrypted:
             self._newobj()
@@ -1936,6 +2017,9 @@ class TTFPDF:
         elif self.layout_mode == 'two':
             self._out('/PageLayout /TwoColumnLeft')
 
+        if self.files:
+            self._out('/Names <</EmbeddedFiles ' + str(self.n_files) + ' 0 R>>')
+
     def _putheader(self):
         self._out('%PDF-' + self.pdf_version)
 
@@ -1954,6 +2038,45 @@ class TTFPDF:
         self._out('/O (' + self._escape(self.o_value) + ')')
         self._out('/U (' + self._escape(self.u_value) + ')')
         self._out('/P ' + str(self.p_value))
+
+    def _putfiles(self):
+        s = ''
+        for i,info in enumerate(self.files):
+            file = info['file']
+            name = info['name']
+            desc = info['desc']
+            if hasattr(file, 'seek') and callable(getattr(file, 'seek')):
+                file.seek(0)
+            fc = file.read()
+
+            self._newobj()
+            s += '(' + self._escape(sprintf('%03d', i)) + ') ' + str(self.n) + ' 0 R '
+            self._out('<<')
+            self._out('/Type /Filespec')
+            self._out('/F ' + self._textstring(name) + '')
+            self._out('/EF <</F ' + str(self.n+1) + ' 0 R>>')
+            if desc:
+                self._out('/Desc ' + self._textstring(desc))
+            self._out('>>')
+            self._out('endobj')
+
+            self._newobj()
+            self._out('<<')
+            self._out('/Type /EmbeddedFile')
+            if self.compress:
+                fc = zlib.compress(fc, 9)
+                self._out('/Filter /FlateDecode')
+            self._out('/Length ' + str(len(fc)))
+            self._out('>>')
+            self._putstream(fc)
+            self._out('endobj')
+
+        self._newobj()
+        self.n_files = self.n
+        self._out('<<')
+        self._out('/Names [' + s + ']')
+        self._out('>>')
+        self._out('endobj')
 
     def _enddoc(self):
         self._putheader()
@@ -2053,140 +2176,12 @@ class TTFPDF:
         """Compute key depending on object number where the encrypted data is stored"""
         return substr(self._md5_16(self.encryption_key + struct.pack('<Lx', n)), 0, 10)
 
+    def _arc(self, x1, y1, x2, y2, x3, y3):
+        h = self.h
+        k = self.k
+        self._out(sprintf('%.2f %.2f %.2f %.2f %.2f %.2f c ', x1*k, (h-y1)*k, x2*k, (h-y2)*k, x3*k, (h-y3)*k))
 
-    def interleaved2of5(self, txt, x, y, w=1.0, h=10.0):
-        """Barcode I2of5 (numeric), adds a 0 if odd lenght"""
-        narrow = w / 3.0
-        wide = w
 
-        # wide/narrow codes for the digits
-        bar_char={}
-        bar_char['0'] = 'nnwwn'
-        bar_char['1'] = 'wnnnw'
-        bar_char['2'] = 'nwnnw'
-        bar_char['3'] = 'wwnnn'
-        bar_char['4'] = 'nnwnw'
-        bar_char['5'] = 'wnwnn'
-        bar_char['6'] = 'nwwnn'
-        bar_char['7'] = 'nnnww'
-        bar_char['8'] = 'wnnwn'
-        bar_char['9'] = 'nwnwn'
-        bar_char['A'] = 'nn'
-        bar_char['Z'] = 'wn'
-
-        self.set_fill_color(0)
-        code = txt
-        # add leading zero if code-length is odd
-        if len(code) % 2 != 0:
-            code = '0' + code
-
-        # add start and stop codes
-        code = 'AA' + code.lower() + 'ZA'
-
-        for i in xrange(0, len(code), 2):
-            # choose next pair of digits
-            char_bar = code[i]
-            char_space = code[i+1]
-            # check whether it is a valid digit
-            if not char_bar in bar_char.keys():
-                raise RuntimeError ('Invalid character for barcode I25: %s' % char_bar)
-            if not char_space in bar_char.keys():
-                raise RuntimeError ('Invalid character for barcode I25: %s' % char_space)
-
-            # create a wide/narrow-sequence (first digit=bars, second digit=spaces)
-            seq = ''
-            for s in xrange(0, len(bar_char[char_bar])):
-                seq += bar_char[char_bar][s] + bar_char[char_space][s]
-
-            for bar in xrange(0, len(seq)):
-                # set line_width depending on value
-                if seq[bar] == 'n':
-                    line_width = narrow
-                else:
-                    line_width = wide
-
-                # draw every second value, because the second digit of the pair is represented by the spaces
-                if bar % 2 == 0:
-                    self.rect(x, y, line_width, h, 'F')
-
-                x += line_width
-
-    def code39(self, txt, x, y, w=1.5, h=5.0):
-        """Barcode 3of9"""
-        wide = w
-        narrow = w /3.0
-        gap = narrow
-
-        bar_char={}
-        bar_char['0'] = 'nnnwwnwnn'
-        bar_char['1'] = 'wnnwnnnnw'
-        bar_char['2'] = 'nnwwnnnnw'
-        bar_char['3'] = 'wnwwnnnnn'
-        bar_char['4'] = 'nnnwwnnnw'
-        bar_char['5'] = 'wnnwwnnnn'
-        bar_char['6'] = 'nnwwwnnnn'
-        bar_char['7'] = 'nnnwnnwnw'
-        bar_char['8'] = 'wnnwnnwnn'
-        bar_char['9'] = 'nnwwnnwnn'
-        bar_char['A'] = 'wnnnnwnnw'
-        bar_char['B'] = 'nnwnnwnnw'
-        bar_char['C'] = 'wnwnnwnnn'
-        bar_char['D'] = 'nnnnwwnnw'
-        bar_char['E'] = 'wnnnwwnnn'
-        bar_char['F'] = 'nnwnwwnnn'
-        bar_char['G'] = 'nnnnnwwnw'
-        bar_char['H'] = 'wnnnnwwnn'
-        bar_char['I'] = 'nnwnnwwnn'
-        bar_char['J'] = 'nnnnwwwnn'
-        bar_char['K'] = 'wnnnnnnww'
-        bar_char['L'] = 'nnwnnnnww'
-        bar_char['M'] = 'wnwnnnnwn'
-        bar_char['N'] = 'nnnnwnnww'
-        bar_char['O'] = 'wnnnwnnwn'
-        bar_char['P'] = 'nnwnwnnwn'
-        bar_char['Q'] = 'nnnnnnwww'
-        bar_char['R'] = 'wnnnnnwwn'
-        bar_char['S'] = 'nnwnnnwwn'
-        bar_char['T'] = 'nnnnwnwwn'
-        bar_char['U'] = 'wwnnnnnnw'
-        bar_char['V'] = 'nwwnnnnnw'
-        bar_char['W'] = 'wwwnnnnnn'
-        bar_char['X'] = 'nwnnwnnnw'
-        bar_char['Y'] = 'wwnnwnnnn'
-        bar_char['Z'] = 'nwwnwnnnn'
-        bar_char['-'] = 'nwnnnnwnw'
-        bar_char['.'] = 'wwnnnnwnn'
-        bar_char[' '] = 'nwwnnnwnn'
-        bar_char['*'] = 'nwnnwnwnn'
-        bar_char['$'] = 'nwnwnwnnn'
-        bar_char['/'] = 'nwnwnnnwn'
-        bar_char['+'] = 'nwnnnwnwn'
-        bar_char['%'] = 'nnnwnwnwn'
-
-        self.set_fill_color(0)
-        code = txt
-
-        code = code.upper()
-        for i in xrange (0, len(code), 2):
-            char_bar = code[i]
-
-            if not char_bar in bar_char.keys():
-                raise RuntimeError ('Invalid character for the barcode: %s' % char_bar)
-
-            seq = ''
-            for s in xrange(0, len(bar_char[char_bar])):
-                seq += bar_char[char_bar][s]
-
-            for bar in xrange(0, len(seq)):
-                if seq[bar] == 'n':
-                    line_width = narrow
-                else:
-                    line_width = wide
-
-                if bar % 2 == 0:
-                    self.rect(x,y,line_width,h,'F')
-                x += line_width
-        x += gap
 
 #End of class
 
@@ -2202,5 +2197,12 @@ if __name__ == "__main__":
     txt = open('HelloWorld.txt', 'r')
     pdf.write(8, txt.read())
     txt.close()
+    pdf.rounded_rectangle(10,12,40,40,10,'', '13')
+    pdf.shadow_cell(10, 10, 'bcd')
+
+    from cStringIO import StringIO
+    a = StringIO()
+    a.write('some text')
+    pdf.attach(a, name='a.txt')
 
     pdf.output('doc.pdf', dest='F')
