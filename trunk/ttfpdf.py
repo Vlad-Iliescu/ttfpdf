@@ -16,6 +16,8 @@ import os
 import zlib
 import struct
 import re
+import uuid
+import hashlib
 
 try:
     # Check if PIL is available, necessary for JPEG support.
@@ -100,6 +102,13 @@ class TTFPDF:
 #~ creator;            #creator
 #~ alias_nb_pages;       #alias for total number of pages
 #~ pdf_version;         #PDF version number
+#~ encrypted;         #whether document is protected
+#~ u_value;         #U entry in pdf document
+#~ o_value;         #O entry in pdf document
+#~ p_value;         #P entry in pdf document
+#~ enc_obj_id;         #encryption object id
+#~ last_rc4_key;         #last RC4 key encrypted (cached for optimisation)
+#~ last_rc4_key_c;         #last RC4 computed key
 
 # ******************************************************************************
 # *                                                                              *
@@ -189,6 +198,11 @@ class TTFPDF:
         self.unifont_subset = None
         self.offsets = {}
         self.page_links = []
+
+        self.encrypted = False
+        self.last_rc4_key = ''
+        self.padding = "\x28\xBF\x4E\x5E\x4E\x75\x8A\x41\x64\x00\x4E\x56\xFF\xFA\x01\x08"\
+            "\x2E\x2E\x00\xB6\xD0\x68\x3E\x80\x2F\x0C\xA9\xFE\x64\x53\x69\x7A"
 
     def set_margins(self, left, top, right=None):
         """Set left, top and right margins"""
@@ -1137,6 +1151,20 @@ class TTFPDF:
 
         return res + s.decode('UTF-8').encode('UTF-16BE')
 
+    def set_protection(self, permisions=(), user_pass='', owner_pass=None):
+        options = {'print':4, 'modify':8, 'copy':16, 'annot-forms':32}
+        protection = 192
+        for permision in permisions:
+            if permision not in options:
+                self.error('Incorrect permission: '+permision)
+            protection += options[permision]
+        if owner_pass is None:
+            owner_pass = uuid.uuid1()
+        self.encrypted = True
+        self._generateencryptionkey(user_pass, owner_pass, protection)
+
+
+
 # ******************************************************************************
 # *                                                                              *
 # *                              Protected methods                               *
@@ -1223,6 +1251,8 @@ class TTFPDF:
 
     def _textstring(self, s):
         """Format a text string"""
+        if self.encrypted:
+            s = self._rc4(self._objectkey(self.n), s)
         return '(' + self._escape(s) + ')'
 
     def _UTF8_to_UTF16(self,s):
@@ -1381,6 +1411,8 @@ class TTFPDF:
         self._out(str(self.n) + ' 0 obj')
 
     def _putstream(self, s):
+        if self.encrypted:
+            s = self._rc4(self._objectkey(self.n), s)
         self._out('stream')
         self._out(s)
         self._out('endstream')
@@ -1864,6 +1896,14 @@ class TTFPDF:
         self._out('>>')
         self._out('endobj')
 
+        if self.encrypted:
+            self._newobj()
+            self.enc_obj_id = self.n
+            self._out('<<')
+            self._putencription()
+            self._out('>>')
+            self._out('endobj')
+
     def _putinfo(self):
         self._out('/Producer ' + self._textstring('PyFPDF ' + FPDF_VERSION + ' https://code.google.com/p/ttfpdf/'))
         if hasattr(self, 'title'):
@@ -1903,6 +1943,17 @@ class TTFPDF:
         self._out('/Size ' + str(self.n+1))
         self._out('/Root ' + str(self.n) + ' 0 R')
         self._out('/Info ' + str(self.n-1) + ' 0 R')
+        if self.encrypted:
+            self._out('/Encrypt ' + str(self.enc_obj_id) + ' 0 R')
+            self._out('/ID [()()]')
+
+    def _putencription(self):
+        self._out('/Filter /Standard')
+        self._out('/V 1')
+        self._out('/R 2')
+        self._out('/O (' + self._escape(self.o_value) + ')')
+        self._out('/U (' + self._escape(self.u_value) + ')')
+        self._out('/P ' + str(self.p_value))
 
     def _enddoc(self):
         self._putheader()
@@ -1936,6 +1987,72 @@ class TTFPDF:
         self._out(o)
         self._out('%%EOF')
         self.state=3
+
+    def _generateencryptionkey(self, user_pass, owner_pass, protection):
+        """Compute encryption key"""
+        user_pass = substr(user_pass + self.padding, 0, 32)
+        owner_pass = substr(owner_pass + self.padding, 0, 32)
+        #Compute O value
+        self.o_value = self._ovalue(user_pass, owner_pass)
+        #Compute encyption key
+        tmp = self._md5_16(user_pass + self.o_value + chr(protection) + "\xFF\xFF\xFF")
+
+        self.encryption_key = substr(tmp, 0, 5)
+        #Compute U value
+        self.u_value = self._uvalue()
+        #Compute P value
+        self.p_value = -((protection^255)+1)
+
+    def _ovalue(self, user_pass, owner_pass):
+        """Compute O value"""
+        tmp = self._md5_16(owner_pass)
+        owner_rc4_key = substr(tmp, 0, 5)
+        return self._rc4(owner_rc4_key, user_pass)
+
+    def _md5_16(self, string):
+        """Get MD5 as binary string"""
+        crypt = hashlib.md5(string).hexdigest()
+        return crypt.decode('hex')
+
+    def _uvalue(self):
+        """Compute U value"""
+        return self._rc4(self.encryption_key, self.padding)
+
+    def _rc4(self, key, text):
+        """RC4 is the standard encryption algorithm used in PDF format"""
+        if self.last_rc4_key != key:
+            k = key * (256/len(key) + 1)
+            rc4 = range(0, 255 + 1)
+            j = 0
+            for i in xrange(256):
+                t = rc4[i]
+                j = (j + t + ord(k[i])) % 256
+                rc4[i] = rc4[j]
+                rc4[j] = t
+            self.last_rc4_key = key
+            self.last_rc4_key_c = rc4
+        else:
+            rc4 = self.last_rc4_key_c
+        l = len(text)
+        a = 0
+        b = 0
+        out = []
+        add = out.append
+        for i in xrange(l):
+            a = (a + 1) % 256
+            t = rc4[a]
+            b = (b + t) % 256
+            rc4[a] = rc4[b]
+            rc4[b] = t
+            k = rc4[(rc4[a] + rc4[b]) % 256]
+            c = ord(text[i])^k
+            add(chr(c))
+        return ''.join(out)
+
+    def _objectkey(self, n):
+        """Compute key depending on object number where the encrypted data is stored"""
+        return substr(self._md5_16(self.encryption_key + struct.pack('<Lx', n)), 0, 10)
+
 
     def interleaved2of5(self, txt, x, y, w=1.0, h=10.0):
         """Barcode I2of5 (numeric), adds a 0 if odd lenght"""
@@ -2077,6 +2194,7 @@ class TTFPDF:
 if __name__ == "__main__":
     pdf = TTFPDF()
     pdf.add_page()
+    pdf.set_protection((),'1', '2')
 
     pdf.add_font('DejaVu','', 'DejaVuSans.ttf', True)
     pdf.set_font('DejaVu','',14)
@@ -2085,4 +2203,4 @@ if __name__ == "__main__":
     pdf.write(8, txt.read())
     txt.close()
 
-    pdf.output('doc.pdf')
+    pdf.output('doc.pdf', dest='F')
