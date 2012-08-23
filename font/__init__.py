@@ -463,4 +463,4 @@ class MakeFont():
 
 if __name__ == "__main__":
     fmake = MakeFont()
-    fmake.get_metrics('UniversCEMedium.ttf', 'univers.afm')
+    fmake.get_metrics('courier.ttf', 'courier.afm')

@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: latin-1 -*-
+# -*- coding: utf-8 -*-
 # ******************************************************************************
 # * Software: TFPDF for python                                                 *
 # * FPDF Version:  1.7                                                         *
@@ -18,6 +17,7 @@ import struct
 import re
 import uuid
 import hashlib
+import math
 
 try:
     # Check if PIL is available, necessary for JPEG support.
@@ -206,6 +206,8 @@ class TTFPDF:
 
         self.files = []
         self.n_files = 0
+
+        self.gradients = []
 
     def set_margins(self, left, top, right=None):
         """Set left, top and right margins"""
@@ -657,23 +659,6 @@ class TTFPDF:
             s = 'q ' + self.text_color + ' '+ s + ' Q'
         self._out(s)
 
-#    def rotate(self, angle, x=None, y=None):
-#        if x is None:
-#            x = self.x
-#        if y is None:
-#            y = self.y;
-#        if self.angle!=0:
-#            self._out('Q')
-#        self.angle = angle
-#        if angle!=0:
-#            angle *= math.pi/180;
-#            c = math.cos(angle);
-#            s = math.sin(angle);
-#            cx = x*self.k;
-#            cy = (self.h-y)*self.k
-#            s = sprintf('q %.5F %.5F %.5F %.5F %.2F %.2F cm 1 0 0 1 %.2F %.2F cm',c,s,-s,c,cx,cy,-cx,-cy)
-#            self._out(s)
-
     def accept_page_break(self):
         """Accept automatic page break or not"""
         return self.auto_page_break
@@ -909,6 +894,22 @@ class TTFPDF:
                 ret.append(substr(s, j, i-j))
         self.x = self.l_margin
         return ret
+
+    def cell_fit_scale(self, w, h=0, txt='', border=0, ln=0, align='', fill=False, link=''):
+        """Cell with horizontal scaling only if necessary"""
+        self._cell_fit(w, h, txt, border, ln, align, fill, link, True, False)
+
+    def cell_fit_scale_force(self, w, h=0, txt='', border=0, ln=0, align='', fill=False, link=''):
+        """Cell with horizontal scaling always"""
+        self._cell_fit(w, h, txt, border, ln, align, fill, link, True, True)
+
+    def cell_fit_space(self, w, h=0, txt='', border=0, ln=0, align='', fill=False, link=''):
+        """Cell with character spacing only if necessary"""
+        self._cell_fit(w, h, txt, border, ln, align, fill, link, False, False)
+
+    def cell_fit_space_force(self, w, h=0, txt='', border=0, ln=0, align='', fill=False, link=''):
+        """Cell with character spacing always"""
+        self._cell_fit( w, h, txt, border, ln, align, fill, link, False, True)
 
     def write(self, h, txt, link=''):
         """Output text in flowing mode"""
@@ -1243,6 +1244,450 @@ class TTFPDF:
         if not file:
             self.error('Cannot open file: '+name)
         self.files.append({'file': file, 'name': name, 'desc': desc})
+
+    def start_transform(self):
+        """save the current graphic state"""
+        self._out('q')
+
+    def stop_transform(self):
+        """restore previous graphic state"""
+        self._out('Q')
+
+    def scale(self, s_x, s_y, x=None, y=None):
+        if not x:
+            x = self.x
+        if not y:
+            y = self.y
+        if s_x == 0 or s_y == 0:
+            self.error('Please use values unequal to zero for Scaling')
+        y = (self.h - y) * self.k
+        x *= self.k
+        #calculate elements of transformation matrix
+        s_x /= 100.0
+        s_y /= 100.0
+        tm = [s_x, 0, 0, s_y, x*(1-s_x), y*(1-s_y)]
+        #scale the coordinate system
+        self._transform(tm)
+
+    def scale_xy(self, s, x=None, y=None):
+        self.scale(s, s, x, y)
+
+    def scale_x(self, s_x, x=None, y=None):
+        self.scale(s_x, 100, x, y)
+
+    def scale_y(self, s_y, x=None, y=None):
+        self.scale(100, s_y, x, y)
+
+    def translate_x(self, t_x):
+        self.translate(t_x, 0)
+
+    def translate_y(self, t_y):
+        self.translate(0, t_y)
+
+    def translate(self, t_x, t_y):
+        #calculate elements of transformation matrix
+        tm = [1, 0, 0, 1, t_x*self.k, t_y*self.k]
+        #translate the coordinate system
+        self._transform(tm)
+
+    def rotate(self, angle, x=None, y=None):
+        if not x:
+            x = self.x
+        if not y:
+            y = self.y
+        y = (self.h - y) * self.k
+        x *= self.k
+        #calculate elements of transformation matrix
+        tm = [math.cos(math.radians(angle)), math.sin(math.radians(angle))]
+        tm.append(-tm[1])
+        tm.append(tm[0])
+        tm.append(x + tm[1] * y - tm[0] * x)
+        tm.append(y - tm[0] * y - tm[1] * x)
+        #rotate the coordinate system around (x, y)
+        self._transform(tm)
+
+    def skew(self, angle_x, angle_y, x=None, y=None):
+        if not x:
+            x = self.x
+        if not y:
+            y = self.y
+        if angle_x <= -90 or angle_x >= 90 or angle_y <=-90 or angle_y >=90:
+            self.error('Please use angle values between -90 and 90 for skewing')
+        x *= self.k
+        y = (self.h - y) * self.k
+        #calculate elements of transformation matrix
+        tm = [1, math.tan(math.radians(angle_y)), math.tan(math.radians(angle_x)), 1]
+        tm.append(-tm[2] * y)
+        tm.append(-tm[1] * x)
+        #skew the coordinate system
+        self._transform(tm)
+
+    def mirror_h(self, x=None):
+        """scaling -100% in x-direction"""
+        self.scale(-100, 100, x)
+
+    def mirror_v(self, y=None):
+        """scaling -100% in y-direction"""
+        self.scale(100, -100, y=y)
+
+    def mirror_p(self, x=None, y=None):
+        """Point reflection on point (x, y). (alias for scaling -100 in x- and y-direction)"""
+        self.scale(-100, -100, x, y)
+
+    def mirror_l(self, angle=0, x=None, y=None):
+        """Reflection against a straight line through point (x, y) with the gradient angle (angle)."""
+        self.scale(-100, 100, x, y)
+        self.rotate(-2*(angle-90), x, y)
+
+    def skew_x(self, angle_x, x=None, y=None):
+        self.skew(angle_x, 0, x, y)
+
+    def skew_y(self, angle_y, x=None, y=None):
+        self.skew(0, angle_y, x, y)
+
+    def linear_gradient(self, x, y, w, h, col1=(), col2=(), coords=(0, 0, 1, 0)):
+        self._clip(x, y, w, h)
+        self._gradient(2, col1, col2, coords)
+
+    def radial_gradient(self, x, y, w, h, col1=(), col2=(), coords=(0.5, 0.5, 0.5, 0.5, 1)):
+        self._clip(x, y, w, h)
+        self._gradient(3, col1, col2, coords)
+
+    def coons_patch_mesh(self, x, y, w, h, col1=(), col2=(), col3=(), col4=(),
+                        coords=(0.00, 0.0, 0.33, 0.00, 0.67, 0.00, 1.00, 0.00, 1.00, 0.33, 1.00, 0.67, 1.00, 1.00,
+                                0.67, 1.00, 0.33, 1.00, 0.00, 1.00, 0.00, 0.67, 0.00, 0.33), coords_min=0,
+                        coords_max=1):
+        self._clip(x, y, w ,h)
+        n = len(self.gradients)
+        self.gradients.append({'type': 6})  #coons patch mesh
+        #check the coords array if it is the simple array or the multi patch array
+        if not isinstance(coords, dict):
+            #simple array -> convert to multi patch array
+            if len(col1) < 3:
+                col1 = [col1[0], col1[1], col1[1]]
+            if len(col2) < 3:
+                col2 = [col2[0], col2[1], col2[1]]
+            if len(col3) < 3:
+                col3 = [col3[0], col3[1], col3[1]]
+            if len(col4) < 3:
+                col4 = [col4[0], col4[1], col4[1]]
+            patch_array = [{
+                'f': 0,
+                'points': list(coords),
+                'colors': [{'r': col1[0], 'g': col1[1], 'b': col1[2]}, {'r': col2[0], 'g': col2[1], 'b': col2[2]},
+                           {'r': col3[0], 'g': col3[1], 'b': col3[2]}, {'r': col4[0], 'g': col4[1], 'b': col4[2]}]
+            }]
+        else:
+            #multi patch array
+            patch_array = coords
+        bpcd = 65535 #16 BitsPerCoordinate
+        #build the data stream
+        stream = []
+        stream_add = stream.append
+        for i in xrange(len(patch_array)):
+            stream_add(chr(patch_array[i]['f'])) #start with the edge flag as 8 bit
+            for j in xrange(len(patch_array[i]['points'])):
+                #each point as 16 bit
+                patch_array[i]['points'][j] = ((patch_array[i]['points'][j] - coords_min) /
+                                               (coords_max - coords_min)) * bpcd
+                if patch_array[i]['points'][j] < 0:
+                    patch_array[i]['points'][j] = 0
+                if patch_array[i]['points'][j] > bpcd:
+                    patch_array[i]['points'][j] = bpcd
+                stream_add(chr(int(math.floor(patch_array[i]['points'][j] / 256.0))))
+                stream_add(chr(int(math.floor(patch_array[i]['points'][j] % 256))))
+            for j in xrange(len(patch_array[i]['colors'])):
+                #each color component as 8 bit
+                stream_add(chr(patch_array[i]['colors'][j]['r']))
+                stream_add(chr(patch_array[i]['colors'][j]['g']))
+                stream_add(chr(patch_array[i]['colors'][j]['b']))
+        self.gradients[n]['stream'] = ''.join(stream)
+        #paint the gradient
+        self._out('/Sh' + str(n) + ' sh')
+        #restore previous Graphic State
+        self._out('Q')
+
+    def set_line_style(self, style):
+        if 'width' in style:
+            width_prev = self.line_width
+            self.set_line_width(style['width'])
+            self.line_width = width_prev
+        if 'cap' in style:
+            ca = {'butt': 0, 'round': 1, 'square': 2}
+            if style['cap'] in ca:
+                self._out(str(ca[style['cap']]) + ' J')
+        if 'join' in style:
+            ja = {'miter': 0, 'round': 1, 'bevel': 2}
+        if 'dash' in style:
+            dash_string = ''
+            if style['dash']:
+                tab = style['dash'].split(',')
+                dash_string = ' '.join([sprintf('%.2f', float(v)) for v in tab])
+            if not('phase' in style and style['dash']):
+                style['phase'] = 0
+            self._out(sprintf('[%s] %.2f d', dash_string, style['phase']))
+        if 'color' in style:
+            r,g,b = style['color']
+            self.set_draw_color(r,g,b)
+
+    def styled_line(self, x1, y1, x2, y2, style = None):
+        if style:
+            self.set_line_style(style)
+        self.line(x1, y1, x2, y2)
+
+    def styled_rect(self, x, y, w, h, style='', border_style=None, fill_color=None):
+        if 'F' not in style and fill_color:
+            r,g,b = fill_color
+            self.set_fill_color(r, g, b)
+        if style == 'F':
+            border_style = None
+            self.rect(x, y, w, h, style)
+        elif style == 'DF' or style == 'FD':
+            if not border_style or 'all' in border_style:
+                if 'all' in border_style:
+                    self.set_line_style(border_style['all'])
+                    border_style = None
+                else:
+                    style = 'F'
+                self.rect(x, y, w, h, style)
+        else:
+            if not border_style or 'all' in border_style:
+                if 'all' in border_style and border_style['all']:
+                    self.set_line_style(border_style['all'])
+                    border_style = None
+                self.rect(x, y, w, h, style)
+
+        if border_style:
+            if 'L' in border_style and border_style['L']:
+                self.styled_line(x, y, x, y + h, border_style['L'])
+            if 'T' in border_style and border_style['T']:
+                self.styled_line(x, y, x + w, y, border_style['T'])
+            if 'R' in border_style and border_style['R']:
+                self.styled_line(x + w, y, x + w, y + h, border_style['R'])
+            if 'B' in border_style and border_style['B']:
+                self.styled_line(x, y + h, x + w, y + h, border_style['B'])
+
+    def styled_curve(self, x0, y0, x1, y1, x2, y2, x3, y3, style='', line_style=None, fill_color=None):
+        if 'F' not in style and fill_color:
+            r,g,b = fill_color
+            self.set_fill_color(r, g, b)
+        if style == 'F':
+            op = 'f'
+            line_style = None
+        elif style == 'FD' or style == 'DF':
+            op = 'B'
+        else:
+            op = 'S'
+        if line_style:
+            self.set_line_style(line_style)
+        self._point(x0, y0)
+        self._curve(x1, y1, x2, y2, x3, y3)
+        self._out(op)
+
+    def styled_ellipse(self, x0, y0, rx, ry=0, angle=0, a_start=0, a_finish=360, style='', line_style=None, fill_color=None,
+                n_seg=8):
+        if rx:
+            if 'F' not in style and fill_color:
+                r,g,b = fill_color
+                self.set_fill_color(r, g, b)
+            if style == 'F':
+                op = 'f'
+                line_style = None
+            elif style == 'FD' or style == 'DF':
+                op = 'B'
+            elif style == 'C':
+                op = 's'    #small 's' means closing the path as well
+            else:
+                op = 'S'
+            if line_style:
+                self.set_line_style(line_style)
+            if not ry:
+                ry = rx
+            rx *= self.k
+            ry *= self.k
+            if n_seg < 2:
+                n_seg = 2
+            a_start = math.radians(float(a_start))
+            a_finish = math.radians(float(a_finish))
+            total_angle = a_finish - a_start
+
+            dt = total_angle/n_seg
+            dtm = dt/3.0
+
+            x0 *= self.k
+            y0 = (self.h - y0) * self.k
+            if angle:
+                a = -math.radians(float(angle))
+                self._out(sprintf('q %.2f %.2f %.2f %.2f %.2f %.2f cm', math.cos(a), -1 * math.sin(a), math.sin(a),
+                    math.cos(a), x0, y0))
+                x0 = 0
+                y0 = 0
+
+            t1 = a_start
+            a0 = x0 + (rx * math.cos(t1))
+            b0 = y0 + (ry * math.sin(t1))
+            c0 = -rx * math.sin(t1)
+            d0 = ry * math.cos(t1)
+            self._point(a0/self.k, self.h - (b0 / self.k))
+            for i in xrange(1, n_seg+1):
+                #Draw this bit of the total curve.
+                t1 = (i * dt) + a_start
+                a1 = x0 + (rx * math.cos(t1))
+                b1 = y0 + (ry * math.sin(t1))
+                c1 = -rx * math.sin(t1)
+                d1 = ry * math.cos(t1)
+                self._curve((a0 + (c0 * dtm)) / self.k, self.h - ((b0 + (d0 * dtm)) / self.k),
+                    (a1 - (c1 * dtm)) / self.k, self.h - ((b1 - (d1 * dtm)) / self.k),
+                    a1 / self.k, self.h - (b1 / self.k))
+                a0 = a1
+                b0 = b1
+                c0 = c1
+                d0 = d1
+
+            self._out(op)
+            if angle:
+                self._out('Q')
+
+    def styled_circle(self, x0, y0, r, a_start=0, a_finish=360, style='', line_style=None, fill_color=None, n_seg=8):
+        self.styled_ellipse(x0, y0, r, 0, 0, a_start, a_finish, style, line_style, fill_color, n_seg)
+
+    def styled_polygon(self, p, style='', line_style=None, fill_color=None):
+        np = len(p) / 2
+        if 'F' not in style and fill_color:
+            r,g,b = fill_color
+            self.set_fill_color(r, g, b)
+        if style == 'F':
+            line_style = None
+            op = 'f'
+        elif style == 'FD' or style == 'DF':
+            op = 'B'
+        else:
+            op = 'S'
+        draw = True
+        if line_style:
+            if 'all' in line_style:
+                self.set_line_style(line_style['all'])
+            else:
+                #0 .. (np - 1), op = {B, S}
+                draw = False
+                if op == 'B':
+                    op = 'f'
+                    self._point(p[0], p[1])
+                    for i in xrange(2, np*2, 2):
+                        self._line(p[i], p[i+1])
+                    self._line(p[0], p[1])
+                    self._out(op)
+                p[np * 2] = p[0]
+                p[np * 2 + 1] = p[1]
+                for i in xrange(np):
+                    if i in line_style and line_style[i]:
+                        self.styled_line(p[i * 2], p[(i * 2) + 1], p[(i * 2) + 2], p[(i * 2) + 3], line_style[i])
+        if draw:
+            self._point(p[0], p[1])
+            for i in xrange(2, np*2, 2):
+                self._line(p[i], p[i+1])
+            self._line(p[0], p[1])
+            self._out(op)
+
+    def styled_regular_polygon(self, x0, y0, r, ns, angle=0, circle=False, style='', line_style=None,
+            fill_color=None, circle_style='', circle_line_style=None, circle_fill_color=None):
+        if ns < 3:
+            ns = 3
+        if circle:
+            self.styled_circle(x0, y0, r, 0, 360, circle_style, circle_line_style, circle_fill_color)
+        p = []
+        p_add = p.append
+        for i in xrange(ns):
+            a = angle + (i * 360.0) / ns
+            a_rad = math.radians(float(a))
+            p_add(x0 + (r * math.sin(a_rad)))
+            p_add(y0 + (r * math.cos(a_rad)))
+        self.styled_polygon(p, style, line_style, fill_color)
+
+    def styled_star_polygon(self, x0, y0, r, nv, ng, angle=0, circle=False, style = '', line_style=None,
+                            fill_color=None, circle_style='', circle_line_style=None, circle_fill_color=None):
+        if nv < 2:
+            nv = 2
+        if circle:
+            self.styled_circle(x0, y0, r, 0, 360, circle_style, circle_line_style, circle_fill_color)
+        p2 = []
+        p2_add = p2.append
+        visited = []
+        visited_add = visited.append
+        for i in xrange(nv):
+            a = angle + (i * 360.0) / nv
+            a_rad = math.radians(float(a))
+            p2_add(x0 + (r * math.sin(a_rad)))
+            p2_add(y0 + (r * math.cos(a_rad)))
+            visited_add(False)
+        p = []
+        p_add = p.append
+        i = 0
+        p_add(p2[i * 2])
+        p_add(p2[i * 2 + 1])
+        visited[i] = True
+        i += ng
+        i %= nv
+        while not visited[i]:
+            p_add(p2[i * 2])
+            p_add(p2[i * 2 + 1])
+            visited[i] = True
+            i += ng
+            i %= nv
+        self.styled_polygon(p, style, line_style, fill_color)
+
+    def styled_rounded_rect(self, x, y, w, h, r, round_corner='1111', style='', border_style=None, fill_color=None):
+        if round_corner == '0000':
+            self.styled_rect(x, y, w, h, style, border_style, fill_color)
+        else:
+            if 'F' not in style and fill_color:
+                red,g,b = fill_color
+                self.set_fill_color(red, g, b)
+            if style == 'F':
+                border_style = None
+                op = 'f'
+            elif style == 'DF' or style == 'FD':
+                op = 'B'
+            else:
+                op = 'S'
+            if border_style:
+                self.set_line_style(border_style)
+            my_arc = 4.0 / 3.0 * (math.sqrt(2) - 1)
+            self._point(x + r, y)
+            xc = x + w - r
+            yc = y + r
+            self._line(xc, y)
+            if round_corner[0] == '1':
+                self._curve(xc + (r * my_arc), yc - r, xc + r, yc - (r * my_arc), xc + r, yc)
+            else:
+                self._line(x + w, y)
+
+            xc = x + w - r
+            yc = y + h - r
+            self._line(x + w, yc)
+            if round_corner[1] == '1':
+                self._curve(xc + r, yc + (r * my_arc), xc + (r * my_arc), yc + r, xc, yc + r)
+            else:
+                self._line(x + w, y + h)
+
+            xc = x + r
+            yc = y + h - r
+            self._line(xc, y + h)
+            if round_corner[2] == '1':
+                self._curve(xc - (r * my_arc), yc + r, xc - r, yc + (r * my_arc), xc - r, yc)
+            else:
+                self._line(x, y + h)
+
+            xc = x + r
+            yc = y + r
+            self._line(x ,yc)
+            if round_corner[3] == '1':
+                self._curve(xc - r, yc - (r * my_arc), xc - (r * my_arc), yc - r, xc, yc - r)
+            else:
+                self._line(x, y)
+                self._line(x + r, y)
+            self._out(op)
+
 
 # ******************************************************************************
 # *                                                                              *
@@ -1963,8 +2408,16 @@ class TTFPDF:
         self._out('/XObject <<')
         self._putxobjectdict()
         self._out('>>')
+        if len(self.gradients):
+            self._out('/Shading <<')
+            for id, grad in enumerate(self.gradients):
+                self._out('/Sh' + str(id) + ' ' + str(grad['id']) + ' 0 R')
+            self._out('>>')
 
     def _putresources(self):
+        if len(self.gradients):
+            self._putshaders()
+
         self._putfonts()
         self._putimages()
         #Resource dictionary
@@ -2181,28 +2634,173 @@ class TTFPDF:
         k = self.k
         self._out(sprintf('%.2f %.2f %.2f %.2f %.2f %.2f c ', x1*k, (h-y1)*k, x2*k, (h-y2)*k, x3*k, (h-y3)*k))
 
+    def _transform(self, tm):
+        self._out(sprintf('%.3f %.3f %.3f %.3f %.3f %.3f cm', tm[0], tm[1], tm[2], tm[3], tm[4], tm[5]))
 
+    def _clip(self, x, y, w ,h):
+        """save current Graphic State"""
+        s = 'q'
+        #set clipping area
+        s += sprintf(' %.2f %.2f %.2f %.2f re W n', x*self.k, (self.h-y)*self.k, w*self.k, -h*self.k)
+        #set up transformation matrix for gradient
+        s += sprintf(' %.3f 0 0 %.3f %.3f %.3f cm', w*self.k, h*self.k, x*self.k, (self.h-(y+h))*self.k)
+        self._out(s)
 
+    def _gradient(self, type, col1, col2, coords):
+        n = len(self.gradients)
+        self.gradients.append({'type': type})
+        if len(col1) < 3:
+            col1 = [col1[0], col1[0], col1[0]]
+        self.gradients[n]['col1'] = sprintf('%.3f %.3f %.3f',(col1[0]/255.0), (col1[1]/255.0), (col1[2]/255.0))
+        if len(col2) < 3:
+            col2 = [col2[0], col2[0], col2[0]]
+        self.gradients[n]['col2'] = sprintf('%.3f %.3f %.3f',(col2[0]/255.0), (col2[1]/255.0), (col2[2]/255.0))
+        self.gradients[n]['coords'] = coords
+        #paint the gradient
+        self._out('/Sh' + str(n) + ' sh')
+        #restore previous Graphic State
+        self._out('Q')
+
+    def _putshaders(self):
+        for id, grad in enumerate(self.gradients):
+            if grad['type'] == 2 or grad['type'] == 3:
+                self._newobj()
+                self._out('<<')
+                self._out('/FunctionType 2')
+                self._out('/Domain [0.0 1.0]')
+                self._out('/C0 [' + grad['col1'] + ']')
+                self._out('/C1 [' + grad['col2'] + ']')
+                self._out('/N 1')
+                self._out('>>')
+                self._out('endobj')
+                f1 = self.n
+
+            self._newobj()
+            self._out('<<')
+            self._out('/ShadingType ' + str(grad['type']))
+            self._out('/ColorSpace /DeviceRGB')
+            if grad['type'] == 2:
+                self._out(sprintf('/Coords [%.3f %.3f %.3f %.3f]', grad['coords'][0], grad['coords'][1],
+                    grad['coords'][2], grad['coords'][3]))
+                self._out('/Function ' + str(f1) + ' 0 R')
+                self._out('/Extend [true true] ')
+                self._out('>>')
+            elif grad['type'] == 3:
+                #x0, y0, r0, x1, y1, r1
+                #at this time radius of inner circle is 0
+                self._out(sprintf('/Coords [%.3f %.3f 0 %.3f %.3f %.3f]', grad['coords'][0], grad['coords'][1],
+                    grad['coords'][2], grad['coords'][3], grad['coords'][4]))
+                self._out('/Function ' + str(f1) + ' 0 R')
+                self._out('/Extend [true true] ')
+                self._out('>>')
+            elif grad['type'] == 6:
+                self._out('/BitsPerCoordinate 16')
+                self._out('/BitsPerComponent 8')
+                self._out('/Decode[0 1 0 1 0 1 0 1 0 1]')
+                self._out('/BitsPerFlag 8')
+                self._out('/Length ' + str(len(grad['stream'])))
+                self._out('>>')
+                self._putstream(grad['stream'])
+            self._out('endobj')
+            self.gradients[id]['id'] = self.n
+
+    def _point(self, x, y):
+        """Sets a draw point"""
+        self._out(sprintf('%.2f %.2f m', x * self.k, (self.h - y) * self.k))
+
+    def _line(self, x, y):
+        """Draws a line from last draw point"""
+        self._out(sprintf('%.2f %.2f l', x * self.k, (self.h - y) * self.k))
+
+    def _curve(self, x1, y1, x2, y2, x3, y3):
+        """Draws a Bezier curve from last draw point"""
+        self._out(sprintf('%.2f %.2f %.2f %.2f %.2f %.2f c', x1 * self.k, (self.h - y1) * self.k, x2 * self.k,
+            (self.h - y2) * self.k, x3 * self.k, (self.h - y3) * self.k))
+
+    def _cell_fit(self, w, h=0, txt='', border=0, ln=0, allign='', fill=False, link='', scale=False, force=True):
+        """Cell with horizontal scaling if text is too wide"""
+        #Get string width
+        str_width = self.get_string_width(txt)
+        #        if self.unifont_subset:
+        #            str_width /= 11.0
+        #Calculate ratio to fit cell
+        if w == 0:
+            w = self.w - self.r_margin - self.x
+        ratio = (w - self.c_margin * 2.0) / str_width
+        fit = (ratio < 1 or (ratio > 1 and force))
+        if fit:
+            if scale:
+                #Calculate horizontal scaling
+                horiz_scale = ratio * 100.0
+                #Set horizontal scaling
+                self._out(sprintf('BT %.2F Tz ET',horiz_scale))
+            else:
+                #Calculate character spacing in points
+                char_space = (w - self.c_margin * 2.0 - str_width) / max(mb_strlen(txt) - 1, 1) * self.k
+                #Set character spacing
+                self._out(sprintf('BT %.2F Tc ET',char_space))
+                #Override user alignment (since text will fill up cell)
+            allign = ''
+            #Pass on to Cell method
+        self.cell(w, h, txt, border, ln, allign, fill, link)
+        #Reset character spacing/horizontal scaling
+        if fit:
+            self._out('BT ' + ('100 Tz' if scale else '0 Tc') + ' ET')
 #End of class
 
 
 if __name__ == "__main__":
     pdf = TTFPDF()
     pdf.add_page()
-    pdf.set_protection((),'1', '2')
+#    pdf.set_protection((),'1', '2')
 
     pdf.add_font('DejaVu','', 'DejaVuSans.ttf', True)
+#    pdf.add_font('Courier','', 'courier.py')
     pdf.set_font('DejaVu','',14)
 
     txt = open('HelloWorld.txt', 'r')
-    pdf.write(8, txt.read())
+    txt.seek(3)
+    t = txt.read()
+    pdf.cell_fit_space_force(80, 4, t, 1)
+#    pdf.cell_fit_scale(30, 10, 'This text is short enough.',1,1)
     txt.close()
-    pdf.rounded_rectangle(10,12,40,40,10,'', '13')
-    pdf.shadow_cell(10, 10, 'bcd')
+#    pdf.rounded_rectangle(10,12,40,40,10,'', '13')
+#    pdf.shadow_cell(10, 10, 'bcd')
 
     from cStringIO import StringIO
     a = StringIO()
     a.write('some text')
     pdf.attach(a, name='a.txt')
+
+
+#    pdf.set_draw_color(120)
+#    pdf.rect(50, 20, 40, 10, 'D')
+#    pdf.set_xy(50, 20)
+#    pdf.set_draw_color(0)
+#
+#    pdf.start_transform()
+#    pdf.scale_xy(150, 50, 30)
+#    pdf.translate(7, 5)
+#    pdf.rotate(20, 50, 60)
+#    pdf.skew_y(-30, 50, 20)
+#    pdf.mirror_l(-20, 60, 60)
+#    pdf.mirror_p()
+#    pdf.rect(50, 20, 40, 10, 'D')
+#    pdf.stop_transform()
+
+#    pdf.linear_gradient(10, 90, 50, 50, (255,0,0), (0,0,200), (0,1,0, 0))
+#    pdf.radial_gradient(110, 90, 50, 50, [255], [0],)
+#    pdf.coons_patch_mesh(10, 145, 50, 50, (255, 255, 0), (0,0,200), (0,255,0), (255,0,0))
+
+    style = {'width': 0.5, 'cap': 'butt', 'join': 'miter', 'dash': '1,1', 'phase': 10, 'color': (0, 0, 0)}
+    pdf.styled_line(5, 10, 80, 30, style)
+    pdf.styled_rect(145, 10, 40, 20, 'D', {'all': style})
+    pdf.styled_curve(140, 40, 150, 55, 180, 45, 200, 75, 'DF', style, (200, 220, 200))
+    pdf.styled_ellipse(100, 105, 20, 10, 0, 0, 360, '', style)
+    pdf.styled_circle(25, 105, 10, 0, 360, '', style)
+    pdf.styled_polygon([160,135,190,155,170,155,200,160,160,165], 'DF', {'all': style}, (220, 220, 220))
+    pdf.styled_regular_polygon(160, 190, 15, 10)
+    pdf.styled_star_polygon(160, 230, 15, 10, 3)
+    pdf.styled_rounded_rect(95, 255, 40, 30, 10.0, '1111', '', style)
 
     pdf.output('doc.pdf', dest='F')
