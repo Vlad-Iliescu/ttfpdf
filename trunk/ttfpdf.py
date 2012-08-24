@@ -659,6 +659,53 @@ class TTFPDF:
             s = 'q ' + self.text_color + ' '+ s + ' Q'
         self._out(s)
 
+    def text_with_direction(self, x, y, txt, direction = 'R'):
+        if self.unifont_subset:
+            txt2 = self._escape(self.UTF8_to_UTF16BE(txt, False))
+            for uni in self.UTF8_string_to_array(txt):
+                self.current_font['subset'][uni] = uni
+        else:
+            txt2 = self._escape(txt)
+
+        if direction == 'R':
+            s = sprintf('BT %.2f %.2f %.2f %.2f %.2f %.2f Tm (%s) Tj ET', 1, 0, 0, 1, x*self.k, (self.h-y)*self.k, txt2)
+        elif direction == 'L':
+            s = sprintf('BT %.2f %.2f %.2f %.2f %.2f %.2f Tm (%s) Tj ET', -1, 0, 0, -1, x*self.k, (self.h-y)*self.k, txt2)
+        elif direction == 'U':
+            s = sprintf('BT %.2f %.2f %.2f %.2f %.2f %.2f Tm (%s) Tj ET', 0, 1, -1, 0, x*self.k, (self.h-y)*self.k, txt2)
+        elif direction == 'D':
+            s = sprintf('BT %.2f %.2f %.2f %.2f %.2f %.2f Tm (%s) Tj ET', 0, -1, 1, 0, x*self.k, (self.h-y)*self.k, txt2)
+        else:
+            s = sprintf('BT %.2f %.2f Td (%s) Tj ET', x*self.k, (self.h-y)*self.k, txt2)
+#        if self.underline and txt != '':
+#            s += ' ' + self._dounderline(x, y, txt)
+        if self.color_flag:
+            s = 'q ' + self.text_color + ' '+ s + ' Q'
+        self._out(s)
+
+    def text_with_rotation(self, x, y, txt, txt_angle, font_angle=0):
+        if self.unifont_subset:
+            txt2 = self._escape(self.UTF8_to_UTF16BE(txt, False))
+            for uni in self.UTF8_string_to_array(txt):
+                self.current_font['subset'][uni] = uni
+        else:
+            txt2 = self._escape(txt)
+
+        font_angle += 90 + txt_angle
+        txt_angle *= math.pi / 180.0
+        font_angle *= math.pi / 180.0
+
+        txt_dx = math.cos(txt_angle)
+        txt_dy = math.sin(txt_angle)
+        font_dx = math.cos(font_angle)
+        font_dy = math.sin(font_angle)
+
+        s = sprintf('BT %.2f %.2f %.2f %.2f %.2f %.2f Tm (%s) Tj ET', txt_dx, txt_dy, font_dx, font_dy, x*self.k,
+                    (self.h-y)*self.k, txt2)
+        if self.color_flag:
+            s = 'q ' + self.text_color + ' '+ s + ' Q'
+        self._out(s)
+
     def accept_page_break(self):
         """Accept automatic page break or not"""
         return self.auto_page_break
@@ -1688,6 +1735,200 @@ class TTFPDF:
                 self._line(x + r, y)
             self._out(op)
 
+    def code128(self, x, y, code, w, h):
+        T128 = [
+            (2, 1, 2, 2, 2, 2),          #0 : [ ]
+            (2, 2, 2, 1, 2, 2),          #1 : [!]
+            (2, 2, 2, 2, 2, 1),          #2 : ["]
+            (1, 2, 1, 2, 2, 3),          #3 : [#]
+            (1, 2, 1, 3, 2, 2),          #4 : [$]
+            (1, 3, 1, 2, 2, 2),          #5 : [%]
+            (1, 2, 2, 2, 1, 3),          #6 : [&]
+            (1, 2, 2, 3, 1, 2),          #7 : [']
+            (1, 3, 2, 2, 1, 2),          #8 : [(]
+            (2, 2, 1, 2, 1, 3),          #9 : [)]
+            (2, 2, 1, 3, 1, 2),          #10 : [*]
+            (2, 3, 1, 2, 1, 2),          #11 : [+]
+            (1, 1, 2, 2, 3, 2),          #12 : [,]
+            (1, 2, 2, 1, 3, 2),          #13 : [-]
+            (1, 2, 2, 2, 3, 1),          #14 : [.]
+            (1, 1, 3, 2, 2, 2),          #15 : [/]
+            (1, 2, 3, 1, 2, 2),          #16 : [0]
+            (1, 2, 3, 2, 2, 1),          #17 : [1]
+            (2, 2, 3, 2, 1, 1),          #18 : [2]
+            (2, 2, 1, 1, 3, 2),          #19 : [3]
+            (2, 2, 1, 2, 3, 1),          #20 : [4]
+            (2, 1, 3, 2, 1, 2),          #21 : [5]
+            (2, 2, 3, 1, 1, 2),          #22 : [6]
+            (3, 1, 2, 1, 3, 1),          #23 : [7]
+            (3, 1, 1, 2, 2, 2),          #24 : [8]
+            (3, 2, 1, 1, 2, 2),          #25 : [9]
+            (3, 2, 1, 2, 2, 1),          #26 : [:]
+            (3, 1, 2, 2, 1, 2),          #27 : [;]
+            (3, 2, 2, 1, 1, 2),          #28 : [<]
+            (3, 2, 2, 2, 1, 1),          #29 : [=]
+            (2, 1, 2, 1, 2, 3),          #30 : [>]
+            (2, 1, 2, 3, 2, 1),          #31 : [?]
+            (2, 3, 2, 1, 2, 1),          #32 : [@]
+            (1, 1, 1, 3, 2, 3),          #33 : [A]
+            (1, 3, 1, 1, 2, 3),          #34 : [B]
+            (1, 3, 1, 3, 2, 1),          #35 : [C]
+            (1, 1, 2, 3, 1, 3),          #36 : [D]
+            (1, 3, 2, 1, 1, 3),          #37 : [E]
+            (1, 3, 2, 3, 1, 1),          #38 : [F]
+            (2, 1, 1, 3, 1, 3),          #39 : [G]
+            (2, 3, 1, 1, 1, 3),          #40 : [H]
+            (2, 3, 1, 3, 1, 1),          #41 : [I]
+            (1, 1, 2, 1, 3, 3),          #42 : [J]
+            (1, 1, 2, 3, 3, 1),          #43 : [K]
+            (1, 3, 2, 1, 3, 1),          #44 : [L]
+            (1, 1, 3, 1, 2, 3),          #45 : [M]
+            (1, 1, 3, 3, 2, 1),          #46 : [N]
+            (1, 3, 3, 1, 2, 1),          #47 : [O]
+            (3, 1, 3, 1, 2, 1),          #48 : [P]
+            (2, 1, 1, 3, 3, 1),          #49 : [Q]
+            (2, 3, 1, 1, 3, 1),          #50 : [R]
+            (2, 1, 3, 1, 1, 3),          #51 : [S]
+            (2, 1, 3, 3, 1, 1),          #52 : [T]
+            (2, 1, 3, 1, 3, 1),          #53 : [U]
+            (3, 1, 1, 1, 2, 3),          #54 : [V]
+            (3, 1, 1, 3, 2, 1),          #55 : [W]
+            (3, 3, 1, 1, 2, 1),          #56 : [X]
+            (3, 1, 2, 1, 1, 3),          #57 : [Y]
+            (3, 1, 2, 3, 1, 1),          #58 : [Z]
+            (3, 3, 2, 1, 1, 1),          #59 : [[]
+            (3, 1, 4, 1, 1, 1),          #60 : [\]
+            (2, 2, 1, 4, 1, 1),          #61 : []]
+            (4, 3, 1, 1, 1, 1),          #62 : [^]
+            (1, 1, 1, 2, 2, 4),          #63 : [_]
+            (1, 1, 1, 4, 2, 2),          #64 : [`]
+            (1, 2, 1, 1, 2, 4),          #65 : [a]
+            (1, 2, 1, 4, 2, 1),          #66 : [b]
+            (1, 4, 1, 1, 2, 2),          #67 : [c]
+            (1, 4, 1, 2, 2, 1),          #68 : [d]
+            (1, 1, 2, 2, 1, 4),          #69 : [e]
+            (1, 1, 2, 4, 1, 2),          #70 : [f]
+            (1, 2, 2, 1, 1, 4),          #71 : [g]
+            (1, 2, 2, 4, 1, 1),          #72 : [h]
+            (1, 4, 2, 1, 1, 2),          #73 : [i]
+            (1, 4, 2, 2, 1, 1),          #74 : [j]
+            (2, 4, 1, 2, 1, 1),          #75 : [k]
+            (2, 2, 1, 1, 1, 4),          #76 : [l]
+            (4, 1, 3, 1, 1, 1),          #77 : [m]
+            (2, 4, 1, 1, 1, 2),          #78 : [n]
+            (1, 3, 4, 1, 1, 1),          #79 : [o]
+            (1, 1, 1, 2, 4, 2),          #80 : [p]
+            (1, 2, 1, 1, 4, 2),          #81 : [q]
+            (1, 2, 1, 2, 4, 1),          #82 : [r]
+            (1, 1, 4, 2, 1, 2),          #83 : [s]
+            (1, 2, 4, 1, 1, 2),          #84 : [t]
+            (1, 2, 4, 2, 1, 1),          #85 : [u]
+            (4, 1, 1, 2, 1, 2),          #86 : [v]
+            (4, 2, 1, 1, 1, 2),          #87 : [w]
+            (4, 2, 1, 2, 1, 1),          #88 : [x]
+            (2, 1, 2, 1, 4, 1),          #89 : [y]
+            (2, 1, 4, 1, 2, 1),          #90 : [z]
+            (4, 1, 2, 1, 2, 1),          #91 : [{]
+            (1, 1, 1, 1, 4, 3),          #92 : [|]
+            (1, 1, 1, 3, 4, 1),          #93 : [}]
+            (1, 3, 1, 1, 4, 1),          #94 : [~]
+            (1, 1, 4, 1, 1, 3),          #95 : [DEL]
+            (1, 1, 4, 3, 1, 1),          #96 : [FNC3]
+            (4, 1, 1, 1, 1, 3),          #97 : [FNC2]
+            (4, 1, 1, 3, 1, 1),          #98 : [SHIFT]
+            (1, 1, 3, 1, 4, 1),          #99 : [Cswap]
+            (1, 1, 4, 1, 3, 1),          #100 : [Bswap]
+            (3, 1, 1, 1, 4, 1),          #101 : [Aswap]
+            (4, 1, 1, 1, 3, 1),          #102 : [FNC1]
+            (2, 1, 1, 4, 1, 2),          #103 : [Astart]
+            (2, 1, 1, 2, 1, 4),          #104 : [Bstart]
+            (2, 1, 1, 2, 3, 2),          #105 : [Cstart]
+            (2, 3, 3, 1, 1, 1),          #106 : [STOP]
+            (2, 1),                      #107 : [END BAR]
+        ]
+        j_start = {"A": 103, "B": 104, "C": 105}
+        j_swap = {"A": 101, "B": 100, "C": 99}
+        abc_set = []
+        for i in xrange(32, 96):
+            abc_set.append(chr(i))
+        a_set = abc_set[:]
+        b_set = abc_set[:]
+        for i in xrange(32):
+            abc_set.append(chr(i))
+            a_set.append(chr(i))
+        for i in xrange(96, 127):
+            abc_set.append(chr(i))
+            b_set.append(chr(i))
+        sets = {'A':{}, 'B':{}}
+        for i in xrange(96):
+            sets['A'][chr(i)] = chr(i + 64) if i < 32 else chr(i - 32)
+            sets['B'][chr(i+32)] = chr(i)
+        c_set = '0123456789'
+        a_guid = []
+        b_guid = []
+        c_guid = []
+        for i in xrange(len(code)):
+            needle = code[i]
+            a_guid.append('N' if needle not in a_set else 'O')
+            b_guid.append('N' if needle not in b_set else 'O')
+            c_guid.append('N' if needle not in c_set else 'O')
+        s_mini_c = 'OOOO'
+        i_mini_c = 4
+        crypt = []
+        while code > '':
+            c_guid_str = ''.join(c_guid)
+            i = c_guid_str.find(s_mini_c)
+            if i > -1:
+                a_guid[i] = 'N'
+                b_guid[i] = 'N'
+            a_guid_str = ''.join(a_guid)
+            b_guid_str = ''.join(b_guid)
+            if c_guid_str[:i_mini_c] == s_mini_c:
+                crypt.append(chr(j_swap['C']) if len(crypt) else chr(j_start['C']))
+                made = c_guid_str.find('N')
+                if made == -1:
+                    made = len(c_guid_str)
+                if math.fmod(made,2) == 1:
+                    made -= 1
+                for i in xrange(0, made, 2):
+                    crypt.append(chr(int(code[i:i+2])))
+                jeu = 'C'
+            else:
+                made_a = a_guid_str.find('N')
+                if made_a == -1:
+                    made_a = len(a_guid_str)
+                made_b = b_guid_str.find('N')
+                if made_b == -1:
+                    made_b = len(b_guid_str)
+                made = made_b if made_a <  made_b else made_a
+                jeu = 'B' if made_a < made_b else 'A'
+                crypt.append(chr(j_swap[jeu]) if len(crypt) else chr(j_start[jeu]))
+                for j in code[:made]:
+                    crypt.append(sets[jeu][j])
+            code = code[made:]
+            a_guid = a_guid[made:]
+            b_guid = b_guid[made:]
+            c_guid = c_guid[made:]
+        crypt_str = ''.join(crypt)
+        check = ord(crypt_str[0])
+        for i in xrange(len(crypt_str)):
+            check += ord(crypt_str[i]) * i
+        check %= 103
+        crypt.append(chr(check))
+        crypt.append(chr(106))
+        crypt.append(chr(107))
+        crypt_str = ''.join(crypt)
+        i = len(crypt_str) * 11 - 8
+        modul = w * 1.0 / i
+        for i in xrange(len(crypt_str)):
+            c = T128[ord(crypt_str[i])]
+            j = 0
+            while j < len(c) - 1:
+                self.rect(x, y , c[j]*modul, h, 'F')
+                x += (c[j+1] + c[j]) * modul
+                j += 2
+
+        return crypt_str
 
 # ******************************************************************************
 # *                                                                              *
@@ -2756,12 +2997,14 @@ if __name__ == "__main__":
 
     pdf.add_font('DejaVu','', 'DejaVuSans.ttf', True)
 #    pdf.add_font('Courier','', 'courier.py')
-    pdf.set_font('DejaVu','',14)
+    pdf.set_font('DejaVu','U',14)
 
     txt = open('HelloWorld.txt', 'r')
     txt.seek(3)
     t = txt.read()
     pdf.cell_fit_space_force(80, 4, t, 1)
+    pdf.text_with_direction(30,80,t, 'D')
+    pdf.text_with_rotation(50,60,t,45,13)
 #    pdf.cell_fit_scale(30, 10, 'This text is short enough.',1,1)
     txt.close()
 #    pdf.rounded_rectangle(10,12,40,40,10,'', '13')
@@ -2792,15 +3035,20 @@ if __name__ == "__main__":
 #    pdf.radial_gradient(110, 90, 50, 50, [255], [0],)
 #    pdf.coons_patch_mesh(10, 145, 50, 50, (255, 255, 0), (0,0,200), (0,255,0), (255,0,0))
 
-    style = {'width': 0.5, 'cap': 'butt', 'join': 'miter', 'dash': '1,1', 'phase': 10, 'color': (0, 0, 0)}
-    pdf.styled_line(5, 10, 80, 30, style)
-    pdf.styled_rect(145, 10, 40, 20, 'D', {'all': style})
-    pdf.styled_curve(140, 40, 150, 55, 180, 45, 200, 75, 'DF', style, (200, 220, 200))
-    pdf.styled_ellipse(100, 105, 20, 10, 0, 0, 360, '', style)
-    pdf.styled_circle(25, 105, 10, 0, 360, '', style)
-    pdf.styled_polygon([160,135,190,155,170,155,200,160,160,165], 'DF', {'all': style}, (220, 220, 220))
-    pdf.styled_regular_polygon(160, 190, 15, 10)
-    pdf.styled_star_polygon(160, 230, 15, 10, 3)
-    pdf.styled_rounded_rect(95, 255, 40, 30, 10.0, '1111', '', style)
+#    style = {'width': 0.5, 'cap': 'butt', 'join': 'miter', 'dash': '1,1', 'phase': 10, 'color': (0, 0, 0)}
+#    pdf.styled_line(5, 10, 80, 30, style)
+#    pdf.styled_rect(145, 10, 40, 20, 'D', {'all': style})
+#    pdf.styled_curve(140, 40, 150, 55, 180, 45, 200, 75, 'DF', style, (200, 220, 200))
+#    pdf.styled_ellipse(100, 105, 20, 10, 0, 0, 360, '', style)
+#    pdf.styled_circle(25, 105, 10, 0, 360, '', style)
+#    pdf.styled_polygon([160,135,190,155,170,155,200,160,160,165], 'DF', {'all': style}, (220, 220, 220))
+#    pdf.styled_regular_polygon(160, 190, 15, 10)
+#    pdf.styled_star_polygon(160, 230, 15, 10, 3)
+#    pdf.styled_rounded_rect(95, 255, 40, 30, 10.0, '1111', '', style)
+
+#    pdf.code128(50,20,'CODE 128',80,20)
+#    pdf.code128(50,70,'Code 128',80,20)
+#    pdf.code128(50,120,'12345678901234567890',110,20)
+    pdf.code128(50,170,'1',125,20)
 
     pdf.output('doc.pdf', dest='F')
