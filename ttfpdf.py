@@ -208,6 +208,8 @@ class TTFPDF:
         self.n_files = 0
 
         self.gradients = []
+        self.widths = []
+        self.aligns = []
 
     def set_margins(self, left, top, right=None):
         """Set left, top and right margins"""
@@ -1930,6 +1932,92 @@ class TTFPDF:
 
         return crypt_str
 
+    def set_widths(self, w):
+        #Set the array of column widths
+        if isinstance(w, (list,tuple,set)):
+            self.widths = w
+        else:
+            self.w = [w]
+
+    def set_aligns(self, a):
+        #Set the array of column alignments
+        if isinstance(a, (list,tuple,set)):
+           self.aligns = a
+        else:
+            self.aligns = [a for _ in len(self.widths)]
+
+    def row(self, data):
+        #Calculate the height of the row
+        nb = 0
+        for i in xrange(len(data)):
+            nb = max(nb, self.nb_lines(self.widths[i], data[i]))
+
+        h = 5 * nb
+        #Issue a page break first if needed
+        self.check_page_break(h)
+
+        #Draw the cells of the row
+        for i in xrange(len(data)):
+            w = self.widths[i]
+            a = self.aligns[i] if len(self.aligns) >= i+1 else 'L'
+            #Save the current position
+            x = self.get_x()
+            y = self.get_y()
+            #Draw the border
+            self.rect(x, y, w, h)
+            #Print the text
+            self.multi_cell(w, 5, data[i], 0, a)
+            #Put the position to the right of the cell
+            self.set_xy(x+w, y)
+        self.ln(h)
+
+    def check_page_break(self, h):
+        #If the height h would cause an overflow, add a new page immediately
+        if self.get_y() + h > self.page_break_trigger:
+            self.add_page(self.cur_orientation)
+
+    def nb_lines(self, w, txt):
+        #Computes the number of lines a MultiCell of width w will take
+        if w == 0:
+            w = self.w - self.r_margin - self.x
+        wmax = (w - 2 * self.c_margin) * 1000 / self.font_size
+        s = txt.replace("\r", "")
+        nb = len(s)
+        if nb > 0 and s[nb - 1] == "\n":
+            nb -= 1
+        sep = -1
+        i = 0
+        j = 0
+        l = 0
+        nl = 1
+        while i < nb:
+            c = s[i]
+            if c == "\n":
+                i += 1
+                sep = -1
+                j = i
+                l = 0
+                nl += 1
+                continue
+            if c == ' ':
+                sep = i
+            l += self.get_string_width(c) * 1000.0 / self.font_size
+            if l > wmax:
+                if sep == -1:
+                    if i == j:
+                        i += 1
+                else:
+                    i = sep + 1
+                sep = -1
+                j = i
+                l = 0
+                nl += 1
+            else:
+                i += 1
+        return nl
+
+
+
 # ******************************************************************************
 # *                                                                              *
 # *                              Protected methods                               *
@@ -2997,23 +3085,23 @@ if __name__ == "__main__":
 
     pdf.add_font('DejaVu','', 'DejaVuSans.ttf', True)
 #    pdf.add_font('Courier','', 'courier.py')
-    pdf.set_font('DejaVu','U',14)
+    pdf.set_font('DejaVu','',14)
 
-    txt = open('HelloWorld.txt', 'r')
-    txt.seek(3)
-    t = txt.read()
-    pdf.cell_fit_space_force(80, 4, t, 1)
-    pdf.text_with_direction(30,80,t, 'D')
-    pdf.text_with_rotation(50,60,t,45,13)
+#    txt = open('HelloWorld.txt', 'r')
+#    txt.seek(3)
+#    t = txt.read()
+#    pdf.cell_fit_space_force(80, 4, t, 1)
+#    pdf.text_with_direction(30,80,t, 'D')
+#    pdf.text_with_rotation(50,60,t,45,13)
 #    pdf.cell_fit_scale(30, 10, 'This text is short enough.',1,1)
-    txt.close()
+#    txt.close()
 #    pdf.rounded_rectangle(10,12,40,40,10,'', '13')
 #    pdf.shadow_cell(10, 10, 'bcd')
 
-    from cStringIO import StringIO
-    a = StringIO()
-    a.write('some text')
-    pdf.attach(a, name='a.txt')
+#    from cStringIO import StringIO
+#    a = StringIO()
+#    a.write('some text')
+#    pdf.attach(a, name='a.txt')
 
 
 #    pdf.set_draw_color(120)
@@ -3049,6 +3137,11 @@ if __name__ == "__main__":
 #    pdf.code128(50,20,'CODE 128',80,20)
 #    pdf.code128(50,70,'Code 128',80,20)
 #    pdf.code128(50,120,'12345678901234567890',110,20)
-    pdf.code128(50,170,'1',125,20)
+#    pdf.code128(50,170,'1',125,20)
 
+    pdf.set_widths([30,50,30,40])
+    for i in xrange(1):
+        pdf.row(['asf sdjh hsdhd sdhh shdhj sdfh shd hdhgsd hdh hsdg fdshd', 'sdfsdfsfsfFsdf', 'jdfgj','sdgdfhadfdf'])
+
+#    pdf.multi_cell(30,5, 'asf sdjh hsdhd sdhh shdhj sdfh shd hdhgsd hdh hsdg fdshd', 1, 'L')
     pdf.output('doc.pdf', dest='F')
